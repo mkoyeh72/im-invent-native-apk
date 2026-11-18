@@ -8,8 +8,8 @@ android {
         applicationId 'id.mkoyeh.iminvent'
         minSdk 23
         targetSdk 35
-        versionCode 2
-        versionName '0.2.0-rc-staging'
+versionCode 4
+versionName '0.4.0-bridge-test'
     }
     buildTypes {
         release { minifyEnabled false }
