@@ -43,6 +43,8 @@ public class MainActivity extends Activity {
     private static final int SCAN_REQUEST = IntentIntegrator.REQUEST_CODE;
     private static final String PREFS = "im_invent_native";
     private static final String PREF_URL = "webapp_url";
+    private static final String PREF_CRASH = "last_crash_report_rc13";
+    private static final String PREF_STAGE = "last_scan_stage_rc13";
     // Configured specifically for the user-provided staging deployment. Not production.
     private static final String DEFAULT_STAGING_URL = "https://script.google.com/macros/s/AKfycbwDYbzHrredpCZ989Rmw9pBPrjDVmn-OuHnPk8_-zH6i0DZt22_MVt8B-JXo7u94aAoWQ/exec";
     private static final int NAVY = Color.rgb(15, 23, 42);
@@ -58,6 +60,7 @@ public class MainActivity extends Activity {
     @SuppressLint("SetJavaScriptEnabled")
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        installCrashRecorder();
         getWindow().setStatusBarColor(NAVY);
         getWindow().setNavigationBarColor(NAVY);
         LinearLayout root = new LinearLayout(this);
@@ -74,7 +77,7 @@ public class MainActivity extends Activity {
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(dp(14), dp(8), dp(14), dp(8));
         TextView title = new TextView(this);
-        title.setText("IM-INVENT • TEST RC12");
+        title.setText("IM-INVENT • TEST RC13");
         title.setTextSize(18);
         title.setTextColor(Color.WHITE);
         title.setTypeface(null, 1);
@@ -85,6 +88,7 @@ public class MainActivity extends Activity {
         bar.addView(scan, new LinearLayout.LayoutParams(dp(92), dp(44)));
         Button config = makeButton("⚙", Color.rgb(30,41,59), Color.WHITE);
         config.setOnClickListener(v -> showUrlDialog());
+        config.setOnLongClickListener(v -> { showDiagnostics(); return true; });
         LinearLayout.LayoutParams settingsParams = new LinearLayout.LayoutParams(dp(54), dp(44));
         settingsParams.leftMargin = dp(8);
         bar.addView(config, settingsParams);
@@ -153,6 +157,7 @@ public class MainActivity extends Activity {
         currentWebAppUrl = getPreferences(MODE_PRIVATE).getString(PREF_URL, DEFAULT_STAGING_URL);
         if (!isAllowedUrl(currentWebAppUrl)) showUrlDialog();
         else webView.loadUrl(currentWebAppUrl);
+        showPreviousCrashOnce();
     }
 
     private int dp(float dp) { return Math.round(dp * getResources().getDisplayMetrics().density); }
@@ -185,7 +190,6 @@ public class MainActivity extends Activity {
 
     private void deliverScanToWebApp(String code) {
         if (webView == null || code == null || code.isEmpty()) return;
-        // JSON encoding prevents barcode text from becoming executable JavaScript.
         final String safeCode = JSONObject.quote(code);
         final String js = "(function(){"
                 + "var d={source:'IM-INVENT-NATIVE-ANDROID',type:'SCAN_RESULT',code:" + safeCode + "};"
@@ -197,10 +201,96 @@ public class MainActivity extends Activity {
                 + "}catch(e){}"
                 + "});"
                 + "})()";
-        // Resend on resumed WebView; frontend deduplicates results; pollResult is a second fallback.
+        // WebView calls must be protected against a destroyed or temporarily detached view.
         Handler handler = new Handler(Looper.getMainLooper());
-        handler.postDelayed(() -> webView.evaluateJavascript(js, null), 300);
-        handler.postDelayed(() -> webView.evaluateJavascript(js, null), 850);
+        handler.postDelayed(() -> sendToWebSafely(js), 300);
+        handler.postDelayed(() -> sendToWebSafely(js), 850);
+    }
+
+    private void sendToWebSafely(String js) {
+        if (isFinishing() || isDestroyed() || webView == null) return;
+        try {
+            webView.evaluateJavascript(js, null);
+        } catch (RuntimeException e) {
+            recordDiagnostic("WEBVIEW_DELIVERY_ERROR", e);
+            toast("Pengiriman hasil ke WebApp gagal. Tahan tombol pengaturan untuk melihat diagnosa.");
+        }
+    }
+
+    private void scanStage(String stage) {
+        try { getPreferences(MODE_PRIVATE).edit().putString(PREF_STAGE, stage).commit(); }
+        catch (RuntimeException ignored) { }
+    }
+
+    private String briefError(Throwable e) {
+        if (e == null) return "unknown";
+        StringBuilder sb = new StringBuilder();
+        sb.append(e.getClass().getName());
+        if (e.getMessage() != null) {
+            String message = e.getMessage().replaceAll("https?://\\S+", "[URL]");
+            sb.append(": ").append(message.substring(0, Math.min(300, message.length())));
+        }
+        StackTraceElement[] stack = e.getStackTrace();
+        for (int i = 0; i < Math.min(12, stack.length); i++) {
+            sb.append("\n  at ").append(stack[i]);
+        }
+        if (e.getCause() != null && e.getCause() != e) {
+            sb.append("\nCaused by: ").append(e.getCause().getClass().getName());
+        }
+        return sb.toString();
+    }
+
+    private void recordDiagnostic(String stage, Throwable e) {
+        try {
+            String report = "IM-INVENT RC13\nStage: " + stage
+                    + "\nAndroid: " + android.os.Build.VERSION.RELEASE
+                    + " (API " + android.os.Build.VERSION.SDK_INT + ")\n"
+                    + briefError(e);
+            getPreferences(MODE_PRIVATE).edit().putString(PREF_CRASH, report).commit();
+        } catch (Throwable ignored) { }
+    }
+
+    private void installCrashRecorder() {
+        final Thread.UncaughtExceptionHandler previous = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((thread, error) -> {
+            String stage = "unknown";
+            try { stage = getPreferences(MODE_PRIVATE).getString(PREF_STAGE, "unknown"); }
+            catch (Throwable ignored) { }
+            recordDiagnostic("FATAL / " + stage + " / " + thread.getName(), error);
+            if (previous != null) previous.uncaughtException(thread, error);
+            else android.os.Process.killProcess(android.os.Process.myPid());
+        });
+    }
+
+    private void showPreviousCrashOnce() {
+        String report = getPreferences(MODE_PRIVATE).getString(PREF_CRASH, "");
+        if (report == null || report.isEmpty()) return;
+        // Show at next launch, not while Android is handling the fatal exception.
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            if (!isFinishing() && !isDestroyed()) showDiagnostics();
+        }, 600);
+    }
+
+    private void showDiagnostics() {
+        final String report = getPreferences(MODE_PRIVATE).getString(PREF_CRASH, "");
+        final String stage = getPreferences(MODE_PRIVATE).getString(PREF_STAGE, "none");
+        final String content = (report == null || report.isEmpty())
+                ? "Belum ada crash tercatat. Tahap terakhir: " + stage
+                : report;
+        new AlertDialog.Builder(this)
+                .setTitle("Diagnostik APK RC13")
+                .setMessage(content)
+                .setPositiveButton("Salin laporan", (d, w) -> {
+                    ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    if (clipboard != null) {
+                        clipboard.setPrimaryClip(ClipData.newPlainText("IM-INVENT diagnostic", content));
+                        toast("Diagnostik disalin. Hapus informasi pribadi sebelum dibagikan.");
+                    }
+                })
+                .setNeutralButton("Hapus laporan", (d, w) ->
+                        getPreferences(MODE_PRIVATE).edit().remove(PREF_CRASH).apply())
+                .setNegativeButton("Tutup", null)
+                .show();
     }
 
     private boolean isAllowedUrl(String input) {
@@ -257,6 +347,7 @@ public class MainActivity extends Activity {
         if (scannerBusy) return;
         if (!isAllowedUrl(currentWebAppUrl)) { showUrlDialog(); return; }
         scannerBusy = true;
+        scanStage("NATIVE_SCANNER_OPEN");
         try {
             new IntentIntegrator(this)
                     .setDesiredBarcodeFormats(
@@ -269,14 +360,16 @@ public class MainActivity extends Activity {
                     .setBeepEnabled(false)
                     .setBarcodeImageEnabled(false)
                     .initiateScan();
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             scannerBusy = false;
-            toast("Tidak dapat membuka scanner ZXing: " + e.getMessage());
+            recordDiagnostic("NATIVE_SCANNER_OPEN", e);
+            toast("Scanner gagal dibuka. Tahan pengaturan untuk laporan error.");
         }
     }
 
     // Long-press SCAN is a controlled diagnostic fallback, not a stock transaction.
     private void showManualCodeDialog() {
+        scanStage("MANUAL_DIALOG_OPEN");
         final EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setHint("Contoh: DW-B66-4");
@@ -298,7 +391,12 @@ public class MainActivity extends Activity {
                         return;
                     }
                     dialog.dismiss();
-                    handleDecodedCode(code, "MANUAL");
+                    try {
+                        handleDecodedCode(code, "MANUAL");
+                    } catch (RuntimeException e) {
+                        recordDiagnostic("MANUAL_DECODE", e);
+                        toast("Tes manual gagal. Tahan pengaturan untuk membaca laporan.");
+                    }
                 }));
         dialog.show();
     }
@@ -316,10 +414,12 @@ public class MainActivity extends Activity {
             toast("Kode kosong, mengandung karakter kontrol, atau terlalu panjang.");
             return;
         }
+        scanStage("RESULT_RECEIVED_" + engine);
         JSONObject result = new JSONObject();
         try { result.put("ok", true); result.put("value", code); }
         catch (Exception ignored) { }
         pendingScan.set(result.toString());
+        scanStage("WEB_DELIVERY_PENDING_" + engine);
         deliverScanToWebApp(code);
         // The dialog makes native recognition observable independently of Apps Script.
         new AlertDialog.Builder(this)
@@ -341,13 +441,19 @@ public class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == SCAN_REQUEST) {
             scannerBusy = false;
-            IntentResult scanResult = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
-            if (scanResult == null) {
-                toast("Hasil scanner tidak dikenali. Laporkan sebagai RC12/RESULT_NULL.");
-            } else if (scanResult.getContents() == null) {
-                toast("Scanner dibatalkan / izin kamera belum diberikan. Cek izin Kamera di Setelan APK.");
-            } else {
-                handleDecodedCode(scanResult.getContents().trim(), "ZXING");
+            scanStage("ZXING_ACTIVITY_RESULT");
+            try {
+                IntentResult scanResult = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
+                if (scanResult == null) {
+                    toast("Hasil scanner tidak dikenali. Tahan pengaturan untuk laporan.");
+                } else if (scanResult.getContents() == null) {
+                    toast("Scanner dibatalkan atau izin kamera belum diberikan.");
+                } else {
+                    handleDecodedCode(scanResult.getContents().trim(), "ZXING");
+                }
+            } catch (RuntimeException e) {
+                recordDiagnostic("ZXING_ACTIVITY_RESULT", e);
+                toast("Kesalahan saat menerima hasil scan. Lihat diagnostik di pengaturan.");
             }
             return;
         }
