@@ -1,26 +1,5 @@
-plugins { id 'com.android.application' }
 
-android {
-    namespace 'id.mkoyeh.iminvent'
-    compileSdk 35
-
-    defaultConfig {
-        applicationId 'id.mkoyeh.iminvent'
-        minSdk 24
-        targetSdk 35
-        versionCode 6
-        versionName '0.6.0-zxing-test'
-    }
-    buildTypes {
-        release { minifyEnabled false }
-        debug { minifyEnabled false }
-    }
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-    }
+plugins {
+    id 'com.android.application' version '8.10.1' apply false
 }
 
-dependencies {
-    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
-}
