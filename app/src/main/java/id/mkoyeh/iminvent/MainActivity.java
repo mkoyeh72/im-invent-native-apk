@@ -45,8 +45,8 @@ public class MainActivity extends Activity {
     private static final String PREF_URL = "webapp_url";
     private static final String PREF_CRASH = "last_crash_report_rc13";
     private static final String PREF_STAGE = "last_scan_stage_rc13";
-    // Configured specifically for the user-provided staging deployment. Not production.
-    private static final String DEFAULT_STAGING_URL = "https://script.google.com/macros/s/AKfycbwDYbzHrredpCZ989Rmw9pBPrjDVmn-OuHnPk8_-zH6i0DZt22_MVt8B-JXo7u94aAoWQ/exec";
+    // Default to the user-confirmed WebApp deployment; configurable via the gear button.
+    private static final String DEFAULT_STAGING_URL = "https://script.google.com/macros/s/AKfycbzJMOVt6qt2VKFUpCKORSjebndMiXfJzvEDOZ7-Z11aZ1ebzVXDx6T0y5XlTzK8B4Il/exec";
     private static final int NAVY = Color.rgb(15, 23, 42);
     private static final int GREEN = Color.rgb(16, 185, 129);
 
@@ -77,7 +77,7 @@ public class MainActivity extends Activity {
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(dp(14), dp(8), dp(14), dp(8));
         TextView title = new TextView(this);
-        title.setText("IM-INVENT • TEST RC13");
+        title.setText("IM-INVENT • APK RC13.5");
         title.setTextSize(18);
         title.setTextColor(Color.WHITE);
         title.setTypeface(null, 1);
@@ -421,14 +421,10 @@ public class MainActivity extends Activity {
         pendingScan.set(result.toString());
         scanStage("WEB_DELIVERY_PENDING_" + engine);
         deliverScanToWebApp(code);
-        // The dialog makes native recognition observable independently of Apps Script.
-        new AlertDialog.Builder(this)
-                .setTitle("QR TERBACA — " + engine)
-                .setMessage("Kode yang dikenali:\n" + code
-                        + "\n\nKode telah dikirim ke halaman IM-INVENT."
-                        + "\nJika detail belum muncul setelah menutup dialog, masalahnya di bridge/WebApp, bukan pembacaan kamera.")
-                .setPositiveButton("Lihat detail", (d, which) -> { })
-                .show();
+        // RC13.5: The result belongs to the WebApp panel. Do not cover it with
+        // an Android AlertDialog after a successful ZXing scan. Both postMessage
+        // delivery and the pendingScan/pollResult fallback remain unchanged.
+        scanStage("WEB_DELIVERY_QUEUED_" + engine);
     }
 
     private class NativeBridge {
