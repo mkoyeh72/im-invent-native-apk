@@ -21,10 +21,13 @@ android {
     }
 }
 
+
 dependencies {
-implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
-// Required at runtime by JourneyApps CaptureActivity / CaptureManager.
-// Do not remove: missing ContextCompat caused scanner crashes on Android 16.
-implementation 'androidx.core:core:1.13.1'
-implementation 'androidx.fragment:fragment:1.6.2'
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+
+    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+    implementation 'androidx.core:core:1.13.1'
+    implementation 'androidx.fragment:fragment:1.6.2'
 }
+
