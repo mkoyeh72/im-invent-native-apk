@@ -31,9 +31,8 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.google.mlkit.vision.codescanner.GmsBarcodeScanner;
-import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions;
-import com.google.mlkit.vision.codescanner.GmsBarcodeScanning;
+import com.google.zxing.integration.android.IntentIntegrator;
+import com.google.zxing.integration.android.IntentResult;
 
 import org.json.JSONObject;
 
@@ -41,6 +40,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 1201;
+    private static final int SCAN_REQUEST = IntentIntegrator.REQUEST_CODE;
     private static final String PREFS = "im_invent_native";
     private static final String PREF_URL = "webapp_url";
     // Configured specifically for the user-provided staging deployment. Not production.
@@ -63,18 +63,25 @@ public class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(NAVY);
+        // Android 15+ edge-to-edge: keep our toolbar below the status bar.
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            v.setPadding(0, insets.getSystemWindowInsetTop(),
+                    0, insets.getSystemWindowInsetBottom());
+            return insets;
+        });
 
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(dp(14), dp(8), dp(14), dp(8));
         TextView title = new TextView(this);
-        title.setText("IM-INVENT • UJI");
+        title.setText("IM-INVENT • TEST RC12");
         title.setTextSize(18);
         title.setTextColor(Color.WHITE);
         title.setTypeface(null, 1);
         bar.addView(title, new LinearLayout.LayoutParams(0, dp(42), 1));
         Button scan = makeButton("SCAN", GREEN, Color.BLACK);
         scan.setOnClickListener(v -> startNativeScanner());
+        scan.setOnLongClickListener(v -> { showManualCodeDialog(); return true; });
         bar.addView(scan, new LinearLayout.LayoutParams(dp(92), dp(44)));
         Button config = makeButton("⚙", Color.rgb(30,41,59), Color.WHITE);
         config.setOnClickListener(v -> showUrlDialog());
@@ -244,29 +251,84 @@ public class MainActivity extends Activity {
 
     private void toast(String text) { runOnUiThread(() -> Toast.makeText(this, text, Toast.LENGTH_LONG).show()); }
 
+    // RC12: Embedded ZXing scanner. Uses the app camera, not the Play services scanning UI.
+    // The Apps Script bridge is intentionally kept identical to RC11.
     private void startNativeScanner() {
         if (scannerBusy) return;
         if (!isAllowedUrl(currentWebAppUrl)) { showUrlDialog(); return; }
         scannerBusy = true;
-        GmsBarcodeScannerOptions opts = new GmsBarcodeScannerOptions.Builder().enableAutoZoom().build();
-        GmsBarcodeScanner scanner = GmsBarcodeScanning.getClient(this, opts);
-        scanner.startScan()
-                .addOnSuccessListener(barcode -> {
-                    scannerBusy = false;
-                    String code = barcode.getRawValue() == null ? "" : barcode.getRawValue().trim();
-                    if (code.isEmpty() || code.length() > 512) { toast("Kode QR kosong atau terlalu panjang."); return; }
-                    // Only a barcode string crosses the JS bridge. Backend still authorizes transactions.
-                    JSONObject result = new JSONObject();
-                    try { result.put("ok", true); result.put("value", code); } catch (Exception ignored) { }
-                    pendingScan.set(result.toString());
-                    deliverScanToWebApp(code);
-                    toast("QR terbaca. Memeriksa detail alat di IM-INVENT...");
-                })
-                .addOnCanceledListener(() -> { scannerBusy = false; })
-                .addOnFailureListener(e -> {
-                    scannerBusy = false;
-                    toast("Scanner gagal. Periksa Google Play services dan koneksi awal: " + e.getMessage());
-                });
+        try {
+            new IntentIntegrator(this)
+                    .setDesiredBarcodeFormats(
+                            IntentIntegrator.QR_CODE,
+                            IntentIntegrator.CODE_128,
+                            IntentIntegrator.CODE_39,
+                            IntentIntegrator.DATA_MATRIX)
+                    .setPrompt("Arahkan QR / barcode ke kotak. Tombol volume untuk zoom tidak diperlukan.")
+                    .setOrientationLocked(true)
+                    .setBeepEnabled(false)
+                    .setBarcodeImageEnabled(false)
+                    .initiateScan();
+        } catch (Exception e) {
+            scannerBusy = false;
+            toast("Tidak dapat membuka scanner ZXing: " + e.getMessage());
+        }
+    }
+
+    // Long-press SCAN is a controlled diagnostic fallback, not a stock transaction.
+    private void showManualCodeDialog() {
+        final EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("Contoh: DW-B66-4");
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setPadding(dp(20), dp(10), dp(20), dp(10));
+        wrap.addView(input, new LinearLayout.LayoutParams(-1, -2));
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Tes kode manual (RC12)")
+                .setMessage("Ketik kode barang untuk memeriksa jalur Android ke IM-INVENT. Tidak ada transaksi otomatis.")
+                .setView(wrap)
+                .setPositiveButton("Tampilkan detail", null)
+                .setNegativeButton("Batal", null)
+                .create();
+        dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(click -> {
+                    String code = input.getText().toString().trim();
+                    if (!validScannedCode(code)) {
+                        input.setError("Kode tidak valid (1–512 karakter; tanpa baris baru)");
+                        return;
+                    }
+                    dialog.dismiss();
+                    handleDecodedCode(code, "MANUAL");
+                }));
+        dialog.show();
+    }
+
+    private boolean validScannedCode(String code) {
+        if (code == null || code.isEmpty() || code.length() > 512) return false;
+        for (int i = 0; i < code.length(); i++) {
+            if (code.charAt(i) < 32 || code.charAt(i) == 127) return false;
+        }
+        return true;
+    }
+
+    private void handleDecodedCode(String code, String engine) {
+        if (!validScannedCode(code)) {
+            toast("Kode kosong, mengandung karakter kontrol, atau terlalu panjang.");
+            return;
+        }
+        JSONObject result = new JSONObject();
+        try { result.put("ok", true); result.put("value", code); }
+        catch (Exception ignored) { }
+        pendingScan.set(result.toString());
+        deliverScanToWebApp(code);
+        // The dialog makes native recognition observable independently of Apps Script.
+        new AlertDialog.Builder(this)
+                .setTitle("QR TERBACA — " + engine)
+                .setMessage("Kode yang dikenali:\n" + code
+                        + "\n\nKode telah dikirim ke halaman IM-INVENT."
+                        + "\nJika detail belum muncul setelah menutup dialog, masalahnya di bridge/WebApp, bukan pembacaan kamera.")
+                .setPositiveButton("Lihat detail", (d, which) -> { })
+                .show();
     }
 
     private class NativeBridge {
@@ -277,6 +339,18 @@ public class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == SCAN_REQUEST) {
+            scannerBusy = false;
+            IntentResult scanResult = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
+            if (scanResult == null) {
+                toast("Hasil scanner tidak dikenali. Laporkan sebagai RC12/RESULT_NULL.");
+            } else if (scanResult.getContents() == null) {
+                toast("Scanner dibatalkan / izin kamera belum diberikan. Cek izin Kamera di Setelan APK.");
+            } else {
+                handleDecodedCode(scanResult.getContents().trim(), "ZXING");
+            }
+            return;
+        }
         if (requestCode == FILE_CHOOSER_REQUEST && filePathCallback != null) {
             filePathCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
             filePathCallback = null;
