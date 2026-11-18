@@ -43,8 +43,8 @@ public class MainActivity extends Activity {
     private static final int SCAN_REQUEST = IntentIntegrator.REQUEST_CODE;
     private static final String PREFS = "im_invent_native";
     private static final String PREF_URL = "webapp_url";
-    private static final String PREF_CRASH = "last_crash_report_rc13";
-    private static final String PREF_STAGE = "last_scan_stage_rc13";
+    private static final String PREF_CRASH = "last_crash_report_rc13_6";
+    private static final String PREF_STAGE = "last_scan_stage_rc13_6";
     // Default to the user-confirmed WebApp deployment; configurable via the gear button.
     private static final String DEFAULT_STAGING_URL = "https://script.google.com/macros/s/AKfycbzJMOVt6qt2VKFUpCKORSjebndMiXfJzvEDOZ7-Z11aZ1ebzVXDx6T0y5XlTzK8B4Il/exec";
     private static final int NAVY = Color.rgb(15, 23, 42);
@@ -77,7 +77,7 @@ public class MainActivity extends Activity {
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(dp(14), dp(8), dp(14), dp(8));
         TextView title = new TextView(this);
-        title.setText("IM-INVENT • APK RC13.5");
+        title.setText("IM-INVENT • APK RC13.6");
         title.setTextSize(18);
         title.setTextColor(Color.WHITE);
         title.setTypeface(null, 1);
@@ -242,7 +242,7 @@ public class MainActivity extends Activity {
 
     private void recordDiagnostic(String stage, Throwable e) {
         try {
-            String report = "IM-INVENT RC13\nStage: " + stage
+            String report = "IM-INVENT RC13.6\nStage: " + stage
                     + "\nAndroid: " + android.os.Build.VERSION.RELEASE
                     + " (API " + android.os.Build.VERSION.SDK_INT + ")\n"
                     + briefError(e);
@@ -278,7 +278,7 @@ public class MainActivity extends Activity {
                 ? "Belum ada crash tercatat. Tahap terakhir: " + stage
                 : report;
         new AlertDialog.Builder(this)
-                .setTitle("Diagnostik APK RC13")
+                .setTitle("Diagnostik APK RC13.6")
                 .setMessage(content)
                 .setPositiveButton("Salin laporan", (d, w) -> {
                     ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
@@ -421,7 +421,7 @@ public class MainActivity extends Activity {
         pendingScan.set(result.toString());
         scanStage("WEB_DELIVERY_PENDING_" + engine);
         deliverScanToWebApp(code);
-        // RC13.5: The result belongs to the WebApp panel. Do not cover it with
+        // RC13.6: The result belongs to the WebApp panel. Do not cover it with
         // an Android AlertDialog after a successful ZXing scan. Both postMessage
         // delivery and the pendingScan/pollResult fallback remain unchanged.
         scanStage("WEB_DELIVERY_QUEUED_" + engine);
