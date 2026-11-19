@@ -8,13 +8,11 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Bundle;
-import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -45,8 +43,8 @@ public class MainActivity extends Activity {
     private static final String PREF_URL = "webapp_url";
     private static final String PREF_CRASH = "last_crash_report_rc13_6";
     private static final String PREF_STAGE = "last_scan_stage_rc13_6";
-    // Default to the user-confirmed WebApp deployment; configurable via the gear button.
-    private static final String DEFAULT_STAGING_URL = "https://script.google.com/macros/s/AKfycbzJMOVt6qt2VKFUpCKORSjebndMiXfJzvEDOZ7-Z11aZ1ebzVXDx6T0y5XlTzK8B4Il/exec";
+    // Fixed, approved production WebApp URL. Users cannot edit or override it.
+    private static final String OFFICIAL_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzJMOVt6qt2VKFUpCKORSjebndMiXfJzvEDOZ7-Z11aZ1ebzVXDx6T0y5XlTzK8B4Il/exec";
     private static final int NAVY = Color.rgb(15, 23, 42);
     private static final int GREEN = Color.rgb(16, 185, 129);
 
@@ -55,7 +53,7 @@ public class MainActivity extends Activity {
     private final AtomicReference<String> pendingScan = new AtomicReference<>("");
     private volatile boolean webBridgeReady = false;
     private boolean scannerBusy = false;
-    private String currentWebAppUrl = "";
+    private final String currentWebAppUrl = OFFICIAL_WEBAPP_URL;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override public void onCreate(Bundle state) {
@@ -77,21 +75,17 @@ public class MainActivity extends Activity {
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(dp(14), dp(8), dp(14), dp(8));
         TextView title = new TextView(this);
-        title.setText("IM-INVENT • APK RC13.6");
+        title.setText("IM-INVENT");
         title.setTextSize(18);
         title.setTextColor(Color.WHITE);
         title.setTypeface(null, 1);
+        // Keep crash diagnostics accessible to maintainers without exposing URL settings.
+        title.setOnLongClickListener(v -> { showDiagnostics(); return true; });
         bar.addView(title, new LinearLayout.LayoutParams(0, dp(42), 1));
         Button scan = makeButton("SCAN", GREEN, Color.BLACK);
         scan.setOnClickListener(v -> startNativeScanner());
         scan.setOnLongClickListener(v -> { showManualCodeDialog(); return true; });
         bar.addView(scan, new LinearLayout.LayoutParams(dp(92), dp(44)));
-        Button config = makeButton("⚙", Color.rgb(30,41,59), Color.WHITE);
-        config.setOnClickListener(v -> showUrlDialog());
-        config.setOnLongClickListener(v -> { showDiagnostics(); return true; });
-        LinearLayout.LayoutParams settingsParams = new LinearLayout.LayoutParams(dp(54), dp(44));
-        settingsParams.leftMargin = dp(8);
-        bar.addView(config, settingsParams);
         root.addView(bar);
 
         webView = new WebView(this);
@@ -154,9 +148,10 @@ public class MainActivity extends Activity {
         });
         root.addView(webView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         setContentView(root);
-        currentWebAppUrl = getPreferences(MODE_PRIVATE).getString(PREF_URL, DEFAULT_STAGING_URL);
-        if (!isAllowedUrl(currentWebAppUrl)) showUrlDialog();
-        else webView.loadUrl(currentWebAppUrl);
+        // A previous APK let users save arbitrary Apps Script /exec URLs locally.
+        // Forget that legacy override so upgrades always open the approved deployment.
+        getPreferences(MODE_PRIVATE).edit().remove(PREF_URL).apply();
+        webView.loadUrl(OFFICIAL_WEBAPP_URL);
         showPreviousCrashOnce();
     }
 
@@ -213,7 +208,7 @@ public class MainActivity extends Activity {
             webView.evaluateJavascript(js, null);
         } catch (RuntimeException e) {
             recordDiagnostic("WEBVIEW_DELIVERY_ERROR", e);
-            toast("Pengiriman hasil ke WebApp gagal. Tahan tombol pengaturan untuk melihat diagnosa.");
+            toast("Pengiriman hasil ke WebApp gagal. Tahan judul IM-INVENT untuk melihat diagnostik.");
         }
     }
 
@@ -278,7 +273,7 @@ public class MainActivity extends Activity {
                 ? "Belum ada crash tercatat. Tahap terakhir: " + stage
                 : report;
         new AlertDialog.Builder(this)
-                .setTitle("Diagnostik APK RC13.6")
+                .setTitle("Diagnostik IM-INVENT")
                 .setMessage(content)
                 .setPositiveButton("Salin laporan", (d, w) -> {
                     ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
@@ -305,47 +300,16 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) { return false; }
     }
 
-    private void showUrlDialog() {
-        EditText edit = new EditText(this);
-        edit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        edit.setText(currentWebAppUrl);
-        edit.setSingleLine(false);
-        edit.setMinLines(2);
-        edit.setHint("https://script.google.com/macros/s/.../exec");
-        LinearLayout wrapper = new LinearLayout(this);
-        wrapper.setPadding(dp(20), dp(4), dp(20), dp(4));
-        wrapper.addView(edit);
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Alamat WebApp IM-INVENT")
-                .setMessage("Tempel URL /exec deployment IM-INVENT yang sudah diuji. URL disimpan hanya di HP ini.")
-                .setView(wrapper)
-                .setCancelable(isAllowedUrl(currentWebAppUrl))
-                .setPositiveButton("Simpan & Buka", null)
-                .setNegativeButton(isAllowedUrl(currentWebAppUrl) ? "Batal" : "Keluar",
-                        (d, w) -> { if (!isAllowedUrl(currentWebAppUrl)) finish(); })
-                .create();
-        dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(b -> {
-            String url = edit.getText().toString().trim();
-            if (!isAllowedUrl(url)) {
-                edit.setError("Gunakan link Apps Script /exec yang valid dan HTTPS");
-                return;
-            }
-            currentWebAppUrl = url;
-            getPreferences(MODE_PRIVATE).edit().putString(PREF_URL, url).apply();
-            pendingScan.set("");
-            dialog.dismiss();
-            webView.loadUrl(url);
-        }));
-        dialog.show();
-    }
-
     private void toast(String text) { runOnUiThread(() -> Toast.makeText(this, text, Toast.LENGTH_LONG).show()); }
 
     // RC12: Embedded ZXing scanner. Uses the app camera, not the Play services scanning UI.
     // The Apps Script bridge is intentionally kept identical to RC11.
     private void startNativeScanner() {
         if (scannerBusy) return;
-        if (!isAllowedUrl(currentWebAppUrl)) { showUrlDialog(); return; }
+        if (!isAllowedUrl(currentWebAppUrl)) {
+            toast("Konfigurasi WebApp bawaan tidak valid. Hubungi admin.");
+            return;
+        }
         scannerBusy = true;
         scanStage("NATIVE_SCANNER_OPEN");
         try {
@@ -363,7 +327,7 @@ public class MainActivity extends Activity {
         } catch (RuntimeException e) {
             scannerBusy = false;
             recordDiagnostic("NATIVE_SCANNER_OPEN", e);
-            toast("Scanner gagal dibuka. Tahan pengaturan untuk laporan error.");
+            toast("Scanner gagal dibuka. Tahan judul IM-INVENT untuk diagnostik.");
         }
     }
 
@@ -441,7 +405,7 @@ public class MainActivity extends Activity {
             try {
                 IntentResult scanResult = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
                 if (scanResult == null) {
-                    toast("Hasil scanner tidak dikenali. Tahan pengaturan untuk laporan.");
+                    toast("Hasil scanner tidak dikenali. Tahan judul IM-INVENT untuk diagnostik.");
                 } else if (scanResult.getContents() == null) {
                     toast("Scanner dibatalkan atau izin kamera belum diberikan.");
                 } else {
@@ -449,7 +413,7 @@ public class MainActivity extends Activity {
                 }
             } catch (RuntimeException e) {
                 recordDiagnostic("ZXING_ACTIVITY_RESULT", e);
-                toast("Kesalahan saat menerima hasil scan. Lihat diagnostik di pengaturan.");
+                toast("Kesalahan saat menerima hasil scan. Tahan judul IM-INVENT untuk diagnostik.");
             }
             return;
         }
