@@ -13,7 +13,6 @@ import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Bundle;
-import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
@@ -23,10 +22,8 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import com.google.zxing.integration.android.IntentIntegrator;
@@ -46,7 +43,6 @@ public class MainActivity extends Activity {
     // Fixed, approved production WebApp URL. Users cannot edit or override it.
     private static final String OFFICIAL_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzJMOVt6qt2VKFUpCKORSjebndMiXfJzvEDOZ7-Z11aZ1ebzVXDx6T0y5XlTzK8B4Il/exec";
     private static final int NAVY = Color.rgb(15, 23, 42);
-    private static final int GREEN = Color.rgb(16, 185, 129);
 
     private WebView webView;
     private ValueCallback<Uri[]> filePathCallback;
@@ -71,22 +67,10 @@ public class MainActivity extends Activity {
             return insets;
         });
 
-        LinearLayout bar = new LinearLayout(this);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(14), dp(8), dp(14), dp(8));
-        TextView title = new TextView(this);
-        title.setText("IM-INVENT");
-        title.setTextSize(18);
-        title.setTextColor(Color.WHITE);
-        title.setTypeface(null, 1);
-        // Keep crash diagnostics accessible to maintainers without exposing URL settings.
-        title.setOnLongClickListener(v -> { showDiagnostics(); return true; });
-        bar.addView(title, new LinearLayout.LayoutParams(0, dp(42), 1));
-        Button scan = makeButton("SCAN", GREEN, Color.BLACK);
-        scan.setOnClickListener(v -> startNativeScanner());
-        scan.setOnLongClickListener(v -> { showManualCodeDialog(); return true; });
-        bar.addView(scan, new LinearLayout.LayoutParams(dp(92), dp(44)));
-        root.addView(bar);
+        // RC13.9: Do not draw a second native toolbar above the WebApp.
+        // The WebApp already provides its own brand/navigation and SCAN button.
+        // Its SCAN action calls IMNative.startScan() (or iminvent-scan://start),
+        // so hiding the redundant native shortcut does not disable ZXing.
 
         webView = new WebView(this);
         webView.setBackgroundColor(NAVY);
@@ -157,16 +141,6 @@ public class MainActivity extends Activity {
 
     private int dp(float dp) { return Math.round(dp * getResources().getDisplayMetrics().density); }
 
-    private Button makeButton(String label, int bg, int fg) {
-        Button btn = new Button(this);
-        btn.setText(label);
-        btn.setAllCaps(false);
-        btn.setTextSize(13);
-        btn.setTextColor(fg);
-        btn.setBackgroundTintList(android.content.res.ColorStateList.valueOf(bg));
-        return btn;
-    }
-
     private boolean isGoogleWebAppHost(String host) {
         return "script.google.com".equalsIgnoreCase(host)
                 || "script.googleusercontent.com".equalsIgnoreCase(host)
@@ -208,7 +182,7 @@ public class MainActivity extends Activity {
             webView.evaluateJavascript(js, null);
         } catch (RuntimeException e) {
             recordDiagnostic("WEBVIEW_DELIVERY_ERROR", e);
-            toast("Pengiriman hasil ke WebApp gagal. Tahan judul IM-INVENT untuk melihat diagnostik.");
+            toast("Pengiriman hasil ke WebApp gagal. Tutup dan buka kembali aplikasi untuk melihat diagnostik.");
         }
     }
 
@@ -327,7 +301,7 @@ public class MainActivity extends Activity {
         } catch (RuntimeException e) {
             scannerBusy = false;
             recordDiagnostic("NATIVE_SCANNER_OPEN", e);
-            toast("Scanner gagal dibuka. Tahan judul IM-INVENT untuk diagnostik.");
+            toast("Scanner gagal dibuka. Tutup dan buka kembali aplikasi untuk diagnostik.");
         }
     }
 
@@ -359,7 +333,7 @@ public class MainActivity extends Activity {
                         handleDecodedCode(code, "MANUAL");
                     } catch (RuntimeException e) {
                         recordDiagnostic("MANUAL_DECODE", e);
-                        toast("Tes manual gagal. Tahan pengaturan untuk membaca laporan.");
+                        toast("Tes manual gagal. Tutup dan buka kembali aplikasi untuk melihat diagnostik.");
                     }
                 }));
         dialog.show();
@@ -405,7 +379,7 @@ public class MainActivity extends Activity {
             try {
                 IntentResult scanResult = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
                 if (scanResult == null) {
-                    toast("Hasil scanner tidak dikenali. Tahan judul IM-INVENT untuk diagnostik.");
+                    toast("Hasil scanner tidak dikenali. Tutup dan buka kembali aplikasi untuk diagnostik.");
                 } else if (scanResult.getContents() == null) {
                     toast("Scanner dibatalkan atau izin kamera belum diberikan.");
                 } else {
@@ -413,7 +387,7 @@ public class MainActivity extends Activity {
                 }
             } catch (RuntimeException e) {
                 recordDiagnostic("ZXING_ACTIVITY_RESULT", e);
-                toast("Kesalahan saat menerima hasil scan. Tahan judul IM-INVENT untuk diagnostik.");
+                toast("Kesalahan saat menerima hasil scan. Tutup dan buka kembali aplikasi untuk diagnostik.");
             }
             return;
         }
